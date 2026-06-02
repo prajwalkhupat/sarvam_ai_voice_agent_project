@@ -4,26 +4,31 @@ import { askAI } from "./api";
 function App() {
 
   const [listening,
-  setListening] =
-  useState(false);
+    setListening] =
+    useState(false);
 
   const [userText,
-  setUserText] =
-  useState("");
+    setUserText] =
+    useState("");
 
   const [aiResponse,
-  setAiResponse] =
-  useState("");
+    setAiResponse] =
+    useState("");
 
-  const startVoice =
-  () => {
+  const startVoice = () => {
 
     const SpeechRecognition =
-      window
-      .SpeechRecognition ||
+      window.SpeechRecognition ||
+      window.webkitSpeechRecognition;
 
-      window
-      .webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+
+      alert(
+        "Speech Recognition not supported"
+      );
+
+      return;
+    }
 
     const recognition =
       new SpeechRecognition();
@@ -36,95 +41,119 @@ function App() {
     setListening(true);
 
     recognition.onresult =
-    async (event) => {
+      async (event) => {
 
-      const text =
-      event.results[0][0]
-      .transcript;
+        const text =
+          event.results[0][0]
+            .transcript;
 
-      setUserText(text);
+        setUserText(text);
 
-      const result =
-      await askAI(text);
+        try {
 
-      setAiResponse(
-        result.ai_response
-      );
+          const result =
+            await askAI(text);
 
-      speak(
-        result.ai_response
-      );
+          console.log(
+            "API Response:",
+            result
+          );
 
-      setListening(false);
-    };
+          if (
+            result.success
+          ) {
+
+            setAiResponse(
+              result.ai_response
+            );
+
+            speak(
+              result.ai_response
+            );
+
+          } else {
+
+            setAiResponse(
+              result.error
+            );
+          }
+
+        } catch (error) {
+
+          console.error(
+            error
+          );
+
+          setAiResponse(
+            "Backend connection failed"
+          );
+        }
+
+        setListening(false);
+      };
   };
 
   const speak =
-  (text) => {
+    (text) => {
 
-    const speech =
-    new SpeechSynthesisUtterance(
-      text
-    );
+      const speech =
+        new SpeechSynthesisUtterance(
+          text
+        );
 
-    speech.rate = 1;
+      speech.rate = 1;
 
-    window
-    .speechSynthesis
-    .speak(speech);
-  };
+      window
+        .speechSynthesis
+        .speak(speech);
+    };
 
   return (
     <div
       style={{
-        padding: "50px",
+        maxWidth:
+          "800px",
+        margin:
+          "40px auto",
         textAlign:
-        "center"
+          "center"
       }}
     >
+
       <h1>
-        AI Voice Agent
+        Sarvam AI Voice Agent
       </h1>
 
       <button
         onClick={
           startVoice
         }
-        style={{
-          padding:
-          "15px 30px",
-          fontSize:
-          "18px"
-        }}
       >
         {
           listening
-          ? "Listening..."
-          : "Start Voice"
+            ? "Listening..."
+            : "Start Voice"
         }
       </button>
 
-      <div
-        style={{
-          marginTop: 40
-        }}
-      >
-        <h3>
-          You Said:
-        </h3>
+      <hr />
 
-        <p>
-          {userText}
-        </p>
+      <h3>
+        You Said
+      </h3>
 
-        <h3>
-          AI Response:
-        </h3>
+      <p>
+        {userText}
+      </p>
 
-        <p>
-          {aiResponse}
-        </p>
-      </div>
+      <h3>
+        AI Response
+      </h3>
+
+      <p>
+        {aiResponse}
+      </p>
+
     </div>
   );
 }
