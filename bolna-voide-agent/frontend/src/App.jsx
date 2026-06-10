@@ -2,56 +2,84 @@ import { useState } from "react";
 import axios from "axios";
 
 function App() {
+  const [numbers, setNumbers] = useState("");
+  const [results, setResults] = useState([]);
 
-  const [customer, setCustomer] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const startCampaign = async () => {
+    const phoneNumbers = numbers
+      .split("\n")
+      .map((n) => n.trim())
+      .filter(Boolean);
 
-  const fetchCustomer = async () => {
+    await axios.post(
+      "http://localhost:8000/start-campaign",
+      {
+        numbers: phoneNumbers,
+      }
+    );
 
-    setLoading(true);
+    alert("Campaign Started");
+  };
 
-    try {
+  const loadResults = async () => {
+    const response = await axios.get(
+      "http://localhost:8000/campaign-results"
+    );
 
-      const response = await axios.get(
-        "http://localhost:8000/latest-customer"
-      );
-
-      setCustomer(response.data);
-
-    } catch (error) {
-
-      console.log(error);
-
-    }
-
-    setLoading(false);
+    setResults(response.data.results);
   };
 
   return (
-    <div
-      style={{
-        padding: "40px",
-        fontFamily: "Arial"
-      }}
-    >
-      <h1>Bolna Customer Data</h1>
+    <div style={{ padding: 30 }}>
+      <h1>Bolna Campaign Manager</h1>
 
-      <button onClick={fetchCustomer}>
-        Get Latest Customer
+      <textarea
+        rows={10}
+        cols={40}
+        placeholder="Enter phone numbers"
+        value={numbers}
+        onChange={(e) =>
+          setNumbers(e.target.value)
+        }
+      />
+
+      <br />
+      <br />
+
+      <button onClick={startCampaign}>
+        Start Campaign
       </button>
 
-      <br />
-      <br />
+      <button
+        onClick={loadResults}
+        style={{ marginLeft: 20 }}
+      >
+        Refresh Results
+      </button>
 
-      {loading && <h3>Loading...</h3>}
+      <hr />
 
-      {customer && (
-        <div>
-          <h2>Name: {customer.name}</h2>
-          <h2>Age: {customer.age}</h2>
-          <h2>Phone: {customer.phone}</h2>
-        </div>
-      )}
+      <table border="1" cellPadding="10">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Age</th>
+            <th>Phone</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {results.map((row, index) => (
+            <tr key={index}>
+              <td>{row.name}</td>
+              <td>{row.age}</td>
+              <td>{row.phone}</td>
+              <td>{row.status}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
