@@ -23,9 +23,13 @@ app.add_middleware(
 BOLNA_API_KEY = os.getenv("BOLNA_API_KEY")
 AGENT_ID = os.getenv("AGENT_ID")
 
-campaign_results = []
 campaign_running = False
+campaign_results = []
 
+
+# =====================================================
+# Extract Customer Data
+# =====================================================
 
 def extract_customer(transcript):
 
@@ -44,15 +48,67 @@ def extract_customer(transcript):
         re.IGNORECASE | re.DOTALL
     )
 
+    hindi_match = re.search(
+        r"आपका नाम\s+(.*?),\s*उम्र\s+(\d+).*?फोन नंबर\s+(\d{10})",
+        transcript,
+        re.DOTALL
+    )
+
     if english_match:
         customer["name"] = english_match.group(1).strip()
         customer["age"] = english_match.group(2).strip()
         customer["phone"] = english_match.group(3).strip()
 
+    elif hindi_match:
+        customer["name"] = hindi_match.group(1).strip()
+        customer["age"] = hindi_match.group(2).strip()
+        customer["phone"] = hindi_match.group(3).strip()
+
     return customer
 
 
-def get_execution(execution_id):
+# =====================================================
+# Make Call
+# =====================================================
+
+def make_call(phone):
+
+    headers = {
+        "Authorization": f"Bearer {BOLNA_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "agent_id": AGENT_ID,
+        "recipient_phone_number": phone
+    }
+
+    print(f"\n📞 Calling {phone}")
+
+    response = requests.post(
+        "https://api.bolna.ai/call",
+        json=payload,
+        headers=headers
+    )
+
+    print("CALL RESPONSE:")
+    print(response.text)
+
+    data = response.json()
+
+    execution_id = (
+        data.get("execution_id")
+        or data.get("id")
+    )
+
+    return execution_id
+
+
+# =====================================================
+# Wait Until Call Completes
+# =====================================================
+
+def wait_for_execution(execution_id):
 
     headers = {
         "Authorization": f"Bearer {BOLNA_API_KEY}"
@@ -69,126 +125,179 @@ def get_execution(execution_id):
 
         status = data.get("status")
 
-        print("STATUS:", status)
+        print(
+            f"Execution: {execution_id} | Status: {status}"
+        )
 
-        if status in ["completed", "busy", "failed"]:
+        if status in [
+            "completed",
+            "busy",
+            "failed",
+            "rejected",
+            "no-answer",
+            "canceled"
+        ]:
             return data
 
         time.sleep(5)
 
 
-def make_call(phone):
-
-    headers = {
-        "Authorization": f"Bearer {BOLNA_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "agent_id": AGENT_ID,
-        "recipient_phone_number": phone
-    }
-
-    response = requests.post(
-        "https://api.bolna.ai/call",
-        json=payload,
-        headers=headers
-    )
-
-    data = response.json()
-
-    execution_id = (
-        data.get("execution_id")
-        or data.get("id")
-    )
-
-    return execution_id
-
+# =====================================================
+# Campaign Worker
+# =====================================================
 
 def process_campaign(numbers):
 
     global campaign_running
     global campaign_results
 
-    retry_list = []
+    retry_numbers = []
+
+    print("\n========================")
+    print("STARTING CAMPAIGN")
+    print("========================")
+
+    # --------------------------------
+    # First Round
+    # --------------------------------
 
     for phone in numbers:
 
-        execution_id = make_call(phone)
+        try:
 
-        if not execution_id:
-            continue
+            execution_id = make_call(phone)
 
-        result = get_execution(execution_id)
+            if not execution_id:
 
-        status = result.get("status")
+                campaign_results.append({
+                    "phone": phone,
+                    "status": "execution_id_not_found"
+                })
 
-        if status == "completed":
+                continue
 
-            transcript = result.get(
-                "transcript",
-                ""
+            result = wait_for_execution(
+                execution_id
             )
 
-            customer = extract_customer(
-                transcript
+            status = result.get("status")
+
+            print(
+                f"{phone} => {status}"
             )
+
+            if status == "completed":
+
+                transcript = result.get(
+                    "transcript",
+                    ""
+                )
+
+                customer = extract_customer(
+                    transcript
+                )
+
+                campaign_results.append({
+                    "execution_id": execution_id,
+                    "phone": phone,
+                    "status": "completed",
+                    "name": customer["name"],
+                    "age": customer["age"]
+                })
+
+            else:
+
+                campaign_results.append({
+                    "execution_id": execution_id,
+                    "phone": phone,
+                    "status": status
+                })
+
+                retry_numbers.append(phone)
+
+        except Exception as e:
 
             campaign_results.append({
                 "phone": phone,
-                "status": "completed",
-                **customer
+                "status": f"error: {str(e)}"
             })
 
-        else:
+    # --------------------------------
+    # Retry Round
+    # --------------------------------
 
-            campaign_results.append({
-                "phone": phone,
-                "status": status
-            })
+    if retry_numbers:
 
-            retry_list.append(phone)
+        print("\n========================")
+        print("RETRYING CUSTOMERS")
+        print("========================")
 
-    print("Retrying Busy Customers")
+    for phone in retry_numbers:
 
-    for phone in retry_list:
+        try:
 
-        execution_id = make_call(phone)
+            execution_id = make_call(phone)
 
-        result = get_execution(execution_id)
+            if not execution_id:
+                continue
 
-        status = result.get("status")
-
-        if status == "completed":
-
-            transcript = result.get(
-                "transcript",
-                ""
+            result = wait_for_execution(
+                execution_id
             )
 
-            customer = extract_customer(
-                transcript
-            )
+            status = result.get("status")
+
+            if status == "completed":
+
+                transcript = result.get(
+                    "transcript",
+                    ""
+                )
+
+                customer = extract_customer(
+                    transcript
+                )
+
+                campaign_results.append({
+                    "execution_id": execution_id,
+                    "phone": phone,
+                    "status": "completed_retry",
+                    "name": customer["name"],
+                    "age": customer["age"]
+                })
+
+            else:
+
+                campaign_results.append({
+                    "execution_id": execution_id,
+                    "phone": phone,
+                    "status": "failed_after_retry"
+                })
+
+        except Exception as e:
 
             campaign_results.append({
                 "phone": phone,
-                "status": "completed_retry",
-                **customer
-            })
-
-        else:
-
-            campaign_results.append({
-                "phone": phone,
-                "status": "failed_after_retry"
+                "status": f"retry_error: {str(e)}"
             })
 
     campaign_running = False
 
+    print("\n========================")
+    print("CAMPAIGN COMPLETED")
+    print("========================")
+
+
+# =====================================================
+# Routes
+# =====================================================
 
 @app.get("/")
 def home():
-    return {"message": "Backend Running"}
+
+    return {
+        "message": "Backend Running"
+    }
 
 
 @app.post("/start-campaign")
@@ -198,6 +307,7 @@ def start_campaign(payload: dict):
     global campaign_results
 
     if campaign_running:
+
         return {
             "success": False,
             "message": "Campaign already running"
@@ -205,19 +315,34 @@ def start_campaign(payload: dict):
 
     campaign_results = []
 
-    numbers = payload["numbers"]
+    numbers = payload.get(
+        "numbers",
+        []
+    )
+
+    print("\nRECEIVED NUMBERS:")
+    print(numbers)
+
+    if not numbers:
+
+        return {
+            "success": False,
+            "message": "No phone numbers received"
+        }
 
     campaign_running = True
 
-    thread = threading.Thread(
+    worker = threading.Thread(
         target=process_campaign,
         args=(numbers,)
     )
 
-    thread.start()
+    worker.start()
 
     return {
-        "success": True
+        "success": True,
+        "total_numbers": len(numbers),
+        "message": "Campaign Started"
     }
 
 
@@ -226,5 +351,6 @@ def campaign_results_api():
 
     return {
         "running": campaign_running,
+        "total": len(campaign_results),
         "results": campaign_results
     }
